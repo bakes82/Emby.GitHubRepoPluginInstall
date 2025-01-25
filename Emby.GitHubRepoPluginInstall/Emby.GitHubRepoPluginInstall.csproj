@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <TargetFramework>netstandard2.0</TargetFramework>
+        <LangVersion>latest</LangVersion>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <PackageReference Include="MediaBrowser.Common" Version="4.9.0.33-beta"/>
+        <PackageReference Include="MediaBrowser.Server.Core" Version="4.9.0.33-beta"/>
+        <PackageReference Include="System.Memory" Version="4.5.5"/>
+    </ItemGroup>
+
+    <ItemGroup>
+        <None Remove="ThumbImage.jpg"/>
+        <EmbeddedResource Include="ThumbImage.jpg"/>
+    </ItemGroup>
+</Project>
