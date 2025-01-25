@@ -80,9 +80,7 @@ public class PluginUIOptions : EditableOptionsBase
             options.grouping.autoExpandAll = true;
             options.focusedRowEnabled      = true;
 
-            // Hide Id column
-            var idColumn = options.columns.FirstOrDefault(e => e.dataField == nameof(ReposToProcess.Id));
-            if (idColumn != null) idColumn.visible = false;
+            foreach (var column in options.columns) column.visible = false;
 
             var repo = options.columns.FirstOrDefault(e => e.dataField == nameof(ReposToProcess.Repository));
             if (repo != null)
@@ -90,6 +88,7 @@ public class PluginUIOptions : EditableOptionsBase
                 repo.caption      = "Repository";
                 repo.width        = 200;
                 repo.visibleIndex = 7;
+                repo.visible      = true;
             }
 
             var owner = options.columns.FirstOrDefault(e => e.dataField == nameof(ReposToProcess.Owner));
@@ -99,6 +98,7 @@ public class PluginUIOptions : EditableOptionsBase
                 owner.width        = 150;
                 owner.visibleIndex = 7;
                 owner.groupIndex   = 0;
+                owner.visible      = true;
             }
 
             var lastVersionDownloaded =
@@ -108,22 +108,25 @@ public class PluginUIOptions : EditableOptionsBase
                 lastVersionDownloaded.caption      = "Last Version Downloaded";
                 lastVersionDownloaded.width        = 150;
                 lastVersionDownloaded.visibleIndex = 9;
+                lastVersionDownloaded.visible      = true;
             }
 
-            var userIdColumn = options.columns.FirstOrDefault(e => e.dataField == nameof(ReposToProcess.GetPreRelease));
-            if (userIdColumn != null)
+            var preRelCol = options.columns.FirstOrDefault(e => e.dataField == nameof(ReposToProcess.GetPreRelease));
+            if (preRelCol != null)
             {
-                userIdColumn.caption      = "Get PreRelease";
-                userIdColumn.width        = 100;
-                userIdColumn.visibleIndex = 20;
+                preRelCol.caption      = "Get PreRelease";
+                preRelCol.width        = 100;
+                preRelCol.visibleIndex = 20;
+                preRelCol.visible      = true;
             }
 
-            var maxViewsColumn = options.columns.FirstOrDefault(e => e.dataField == nameof(ReposToProcess.AutoUpdate));
-            if (maxViewsColumn != null)
+            var autoUpdateCol = options.columns.FirstOrDefault(e => e.dataField == nameof(ReposToProcess.AutoUpdate));
+            if (autoUpdateCol != null)
             {
-                maxViewsColumn.caption      = "Auto Update";
-                maxViewsColumn.width        = 100;
-                maxViewsColumn.visibleIndex = 30;
+                autoUpdateCol.caption      = "Auto Update";
+                autoUpdateCol.width        = 100;
+                autoUpdateCol.visibleIndex = 30;
+                autoUpdateCol.visible      = true;
             }
 
             var lastDateTimeChecked =
@@ -134,14 +137,16 @@ public class PluginUIOptions : EditableOptionsBase
                 lastDateTimeChecked.width        = 200;
                 lastDateTimeChecked.dataType     = DxGridColumn.ColumnDataType.datetime;
                 lastDateTimeChecked.visibleIndex = 40;
+                lastDateTimeChecked.visible      = true;
             }
 
-            var messageColumn = options.columns.FirstOrDefault(e => e.dataField == nameof(ReposToProcess.Url));
-            if (messageColumn != null)
+            var urlCol = options.columns.FirstOrDefault(e => e.dataField == nameof(ReposToProcess.Url));
+            if (urlCol != null)
             {
-                messageColumn.caption      = "Url";
-                messageColumn.width        = 400;
-                messageColumn.visibleIndex = 50;
+                urlCol.caption      = "Url";
+                urlCol.width        = 400;
+                urlCol.visibleIndex = 50;
+                urlCol.visible      = true;
             }
 
             return new DxDataGrid(options);

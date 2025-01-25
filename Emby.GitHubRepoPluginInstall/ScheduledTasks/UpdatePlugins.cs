@@ -85,13 +85,15 @@ public class UpdatePlugins : IScheduledTask, IConfigurableScheduledTask
 
                 if (!release.TagName.Equals(repo.LastVersionDownloaded, StringComparison.OrdinalIgnoreCase))
                 {
-                    await gitHubClient.DownloadReleaseAsync(release, applicationPaths.PluginsPath);
+                    var fileName = await gitHubClient.DownloadReleaseAsync(release, applicationPaths.PluginsPath);
                     downloads++;
                     repo.LastVersionDownloaded = release.TagName;
+                    repo.FileName              = fileName;
 
                     _activityManager.Create(new ActivityLogEntry
                                             {
-                                                Name = $"Plugin {repo.Repository} updated to {repo.LastVersionDownloaded}",
+                                                Name =
+                                                    $"Plugin {repo.Repository} updated to {repo.LastVersionDownloaded}",
                                                 Overview =
                                                     $"<pre><code>Plugin updated to: {repo.LastVersionDownloaded} {Environment.NewLine} {release.Body ?? release.GitHubCommit.GitHubCommitDetails.Message}</code></pre>",
                                                 ShortOverview = null,
@@ -99,7 +101,7 @@ public class UpdatePlugins : IScheduledTask, IConfigurableScheduledTask
                                                 ItemId        = null,
                                                 Date          = DateTimeOffset.Now,
                                                 //UserId        = adminUser.InternalId.ToString(),
-                                                Severity      = LogSeverity.Info
+                                                Severity = LogSeverity.Info
                                             });
                 }
                 else

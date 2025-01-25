@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Net.Http;
 using System.Threading.Tasks;
@@ -75,14 +76,16 @@ internal class MainPageView : PluginPageView
             var item = PluginUiOptions.Repos.Find(x => x.Id == itemId);
             var gitHubClient =
                 new GitHubApiClient(PluginUiOptions.GitHubToken, new HttpClient(), _jsonSerializer, _logger);
-            var release          = await gitHubClient.GetLatestReleasesAsync(item);
+            var release = await gitHubClient.GetLatestReleasesAsync(item);
             var applicationPaths = _appHost.Resolve<IApplicationPaths>();
-            await gitHubClient.DownloadReleaseAsync(release.First(), applicationPaths.PluginsPath);
+            var fileName = await gitHubClient.DownloadReleaseAsync(release.First(), applicationPaths.PluginsPath);
             item.LastVersionDownloaded = release.First()
                                                 .TagName;
             item.LastDateTimeChecked = DateTime.UtcNow;
+            item.FileName            = fileName;
 
             _store.SetOptions(PluginUiOptions);
+            _appHost.NotifyPendingRestart();
 
             return await Task.FromResult((IPluginUIView)this);
         }
@@ -120,7 +123,15 @@ internal class MainPageView : PluginPageView
             try
             {
                 var item = PluginUiOptions.Repos.Find(x => x.Id.ToString() == PluginUiOptions.SelectedItemId.First());
-                if (item != null) PluginUiOptions.Repos.Remove(item);
+
+                if (item != null)
+                {
+                    var applicationPaths = _appHost.Resolve<IApplicationPaths>();
+                    var fullPath         = Path.Combine(applicationPaths.PluginsPath, item.FileName);
+                    if (File.Exists(fullPath)) File.Delete(fullPath);
+                    PluginUiOptions.Repos.Remove(item);
+                    _appHost.NotifyPendingRestart();
+                }
             }
             catch (Exception exception)
             {
@@ -220,17 +231,18 @@ internal class MainPageView : PluginPageView
                 var release = await gitHubClient.GetLatestReleaseAsync(repo);
 
                 _logger.Info(_jsonSerializer.SerializeToString(release, new JsonSerializerOptions
-                                                                         {
-                                                                             Indent = true
-                                                                         }));
+                                                                        {
+                                                                            Indent = true
+                                                                        }));
 
-                var note = release.Body?.Replace("\n", "<br/>") ?? release.GitHubCommit.GitHubCommitDetails.Message.Replace("\n", "<br/>");
-                
+                var note = release.Body?.Replace("\n", "<br/>") ??
+                           release.GitHubCommit.GitHubCommitDetails.Message.Replace("\n", "<br/>");
+
                 var itemToAdd = new GenericListItem
                                 {
                                     PrimaryText = "Repo: " + repo.Repository,
                                     SecondaryText = "Version: "         +
-                                                    release.TagName    +
+                                                    release.TagName     +
                                                     Environment.NewLine +
                                                     "PreRelease: "      +
                                                     release.PreRelease,
@@ -246,11 +258,10 @@ internal class MainPageView : PluginPageView
                                                {
                                                    new GenericListItem
                                                    {
-                                                       PrimaryText = "Release Notes:<br/>" +
-                                                                     note,
+                                                       PrimaryText = "Release Notes:<br/>" + note,
                                                        SecondaryText = "Updated At: " +
                                                                        release.Assets.First()
-                                                                               .UpdatedAt.ToString(),
+                                                                              .UpdatedAt.ToString(),
                                                        Icon     = IconNames.message,
                                                        IconMode = ItemListIconMode.LargeRegular
                                                    }

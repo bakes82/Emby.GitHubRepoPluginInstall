@@ -114,7 +114,7 @@ public class GitHubApiClient
         }
     }
 
-    public async Task DownloadReleaseAsync(GitHubRelease release, string destinationPath)
+    public async Task<string> DownloadReleaseAsync(GitHubRelease release, string destinationPath)
     {
         var downloadUrl = release.Assets.Where(x => x.IsDll)
                                  .OrderByDescending(x => x.UpdatedAt)
@@ -160,6 +160,8 @@ public class GitHubApiClient
 
             throw new Exception($"Error downloading release: {ex.Message}", ex);
         }
+
+        return fileName;
     }
 
     public void Dispose()

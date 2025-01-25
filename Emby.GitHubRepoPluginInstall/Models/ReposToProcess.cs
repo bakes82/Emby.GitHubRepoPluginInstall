@@ -20,6 +20,7 @@ public class ReposToProcess
     public DateTime? LastDateTimeChecked { get; set; }
 
     public string LastVersionDownloaded { get; set; }
+    public string FileName              { get; set; }
 
     private (string Owner, string Repository) RepositoryInfo
     {
