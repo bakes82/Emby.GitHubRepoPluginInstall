@@ -19,6 +19,12 @@ public class PluginUIOptions : EditableOptionsBase
         "This plugin allows you to download and install plugins from GitHub repositories.";
 
     [DontSave]
+    public CaptionItem Logs { get; set; } = new CaptionItem("")
+                                            {
+                                                IsVisible = false
+                                            };
+
+    [DontSave]
     public SpacerItem Spacer1 { get; set; } = new SpacerItem();
 
     [DontSave]

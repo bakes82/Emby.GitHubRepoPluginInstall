@@ -220,6 +220,7 @@ internal class MainPageView : PluginPageView
 
     private async Task CreateReleaseListAsync()
     {
+        PluginUiOptions.Logs = new CaptionItem(""){IsVisible = false};
         PluginUiOptions.Releases = new GenericItemList();
 
         if (!PluginUiOptions.GitHubToken.IsNullOrEmpty())
@@ -228,47 +229,54 @@ internal class MainPageView : PluginPageView
                 new GitHubApiClient(PluginUiOptions.GitHubToken, new HttpClient(), _jsonSerializer, _logger);
             foreach (var repo in PluginUiOptions.Repos)
             {
-                var release = await gitHubClient.GetLatestReleaseAsync(repo);
+                try
+                {
+                    var release = await gitHubClient.GetLatestReleaseAsync(repo);
 
-                _logger.Info(_jsonSerializer.SerializeToString(release, new JsonSerializerOptions
-                                                                        {
-                                                                            Indent = true
-                                                                        }));
+                    _logger.Info(_jsonSerializer.SerializeToString(release, new JsonSerializerOptions
+                                                                            {
+                                                                                Indent = true
+                                                                            }));
 
-                var note = release.Body?.Replace("\n", "<br/>") ??
-                           release.GitHubCommit.GitHubCommitDetails.Message.Replace("\n", "<br/>");
+                    var note = release.Body?.Replace("\n", "<br/>") ??
+                               release.GitHubCommit.GitHubCommitDetails.Message.Replace("\n", "<br/>");
 
-                var itemToAdd = new GenericListItem
-                                {
-                                    PrimaryText = "Repo: " + repo.Repository,
-                                    SecondaryText = "Version: "         +
-                                                    release.TagName     +
-                                                    Environment.NewLine +
-                                                    "PreRelease: "      +
-                                                    release.PreRelease,
-                                    Icon     = IconNames.download,
-                                    IconMode = ItemListIconMode.LargeRegular,
-                                    Button1 = new ButtonItem
-                                              {
-                                                  Caption = "Download",
-                                                  Data1   = "Download",
-                                                  Data2   = repo.Id
-                                              },
-                                    SubItems = new GenericItemList
-                                               {
-                                                   new GenericListItem
+                    var itemToAdd = new GenericListItem
+                                    {
+                                        PrimaryText = "Repo: " + repo.Repository,
+                                        SecondaryText = "Version: "         +
+                                                        release.TagName     +
+                                                        Environment.NewLine +
+                                                        "PreRelease: "      +
+                                                        release.PreRelease,
+                                        Icon     = IconNames.download,
+                                        IconMode = ItemListIconMode.LargeRegular,
+                                        Button1 = new ButtonItem
+                                                  {
+                                                      Caption = "Download",
+                                                      Data1   = "Download",
+                                                      Data2   = repo.Id
+                                                  },
+                                        SubItems = new GenericItemList
                                                    {
-                                                       PrimaryText = "Release Notes:<br/>" + note,
-                                                       SecondaryText = "Updated At: " +
-                                                                       release.Assets.First()
-                                                                              .UpdatedAt.ToString(),
-                                                       Icon     = IconNames.message,
-                                                       IconMode = ItemListIconMode.LargeRegular
+                                                       new GenericListItem
+                                                       {
+                                                           PrimaryText = "Release Notes:<br/>" + note,
+                                                           SecondaryText = "Updated At: " +
+                                                                           release.Assets.First()
+                                                                               .UpdatedAt.ToString(),
+                                                           Icon     = IconNames.message,
+                                                           IconMode = ItemListIconMode.LargeRegular
+                                                       }
                                                    }
-                                               }
-                                };
+                                    };
 
-                PluginUiOptions.Releases.Add(itemToAdd);
+                    PluginUiOptions.Releases.Add(itemToAdd);
+                }catch (Exception e)
+                {
+                    PluginUiOptions.Logs = new CaptionItem("Error: " + e.Message){IsVisible = true};
+                    _logger.ErrorException(e.Message, e);
+                }
             }
         }
     }

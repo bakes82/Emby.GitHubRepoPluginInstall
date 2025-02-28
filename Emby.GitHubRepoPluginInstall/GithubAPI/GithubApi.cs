@@ -53,10 +53,11 @@ public class GitHubApiClient
         var returnData = new List<GitHubRelease>();
 
         foreach (var repo in _repositories)
+        {
             try
             {
-                var response =
-                    await _client.GetAsync($"https://api.github.com/repos/{repo.Owner}/{repo.Repository}/releases");
+                var response = await _client.GetAsync($"https://api.github.com/repos/{repo.Owner}/{repo.Repository}/releases");
+
                 response.EnsureSuccessStatusCode();
 
                 using (var stream = await response.Content.ReadAsStreamAsync())
@@ -65,12 +66,9 @@ public class GitHubApiClient
                     if (gitHubReleases != null)
                     {
                         if (repo.GetPreRelease == false)
-                            gitHubReleases = gitHubReleases.Where(x => !x.PreRelease)
-                                                           .ToList();
+                            gitHubReleases = gitHubReleases.Where(x => !x.PreRelease).ToList();
 
-                        gitHubReleases = gitHubReleases.OrderByDescending(x => x.PublishedAt)
-                                                       .Take(1)
-                                                       .ToList();
+                        gitHubReleases = gitHubReleases.OrderByDescending(x => x.PublishedAt).Take(1).ToList();
 
                         foreach (var gitHubRelease in gitHubReleases)
                         {
@@ -85,7 +83,9 @@ public class GitHubApiClient
             catch (Exception ex)
             {
                 _logger.Error($"Error getting releases for {repo.Owner}/{repo.Repository}: {ex.Message}");
+                throw;
             }
+        }
 
         return returnData;
     }
