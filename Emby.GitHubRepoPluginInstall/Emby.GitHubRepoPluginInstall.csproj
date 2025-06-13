@@ -1,14 +1,13 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
     <PropertyGroup>
-        <TargetFramework>netstandard2.0</TargetFramework>
+        <TargetFramework>net8.0</TargetFramework>
         <LangVersion>latest</LangVersion>
     </PropertyGroup>
 
     <ItemGroup>
         <PackageReference Include="MediaBrowser.Common" Version="4.9.0.52-beta" />
         <PackageReference Include="MediaBrowser.Server.Core" Version="4.9.0.52-beta" />
-        <PackageReference Include="System.Memory" Version="4.6.3" />
     </ItemGroup>
 
     <ItemGroup>
