@@ -6,9 +6,9 @@
     </PropertyGroup>
 
     <ItemGroup>
-        <PackageReference Include="MediaBrowser.Common" Version="4.9.0.33-beta"/>
-        <PackageReference Include="MediaBrowser.Server.Core" Version="4.9.0.33-beta"/>
-        <PackageReference Include="System.Memory" Version="4.5.5"/>
+        <PackageReference Include="MediaBrowser.Common" Version="4.9.0.52-beta" />
+        <PackageReference Include="MediaBrowser.Server.Core" Version="4.9.0.52-beta" />
+        <PackageReference Include="System.Memory" Version="4.6.3" />
     </ItemGroup>
 
     <ItemGroup>

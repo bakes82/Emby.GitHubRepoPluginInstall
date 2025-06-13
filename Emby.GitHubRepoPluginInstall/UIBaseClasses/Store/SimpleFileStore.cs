@@ -23,6 +23,7 @@ public class SimpleFileStore<TOptionType> : SimpleContentStore<TOptionType>
     private readonly string          _pluginFullName;
 
     private TOptionType _options;
+    private DateTime    _lastFileModified;
 
     public SimpleFileStore(IApplicationHost applicationHost, ILogger logger, string pluginFullName)
     {
@@ -53,6 +54,15 @@ public class SimpleFileStore<TOptionType> : SimpleContentStore<TOptionType>
         {
             if (_options == null) return ReloadOptions();
 
+            if (_fileSystem.FileExists(OptionsFilePath))
+            {
+                var lastModified = _fileSystem.GetLastWriteTimeUtc(OptionsFilePath).DateTime;
+                if (lastModified > _lastFileModified)
+                {
+                    return ReloadOptions();
+                }
+            }
+
             return _options;
         }
     }
@@ -66,6 +76,8 @@ public class SimpleFileStore<TOptionType> : SimpleContentStore<TOptionType>
             try
             {
                 if (!_fileSystem.FileExists(OptionsFilePath)) return tempOptions;
+
+                _lastFileModified = _fileSystem.GetLastWriteTimeUtc(OptionsFilePath).DateTime;
 
                 using (var stream = _fileSystem.OpenRead(OptionsFilePath))
                 {
@@ -96,34 +108,12 @@ public class SimpleFileStore<TOptionType> : SimpleContentStore<TOptionType>
 
         lock (_lockObj)
         {
-            // Create a dictionary to store only properties that are not marked with DontSave
-            var filteredOptions = new Dictionary<string, object>();
-
-            foreach (var property in typeof(TOptionType).GetProperties())
-            {
-                if (property.GetCustomAttributes(typeof(DontSaveAttribute), false)
-                            .Any())
-                    continue;
-
-                if (property.CanRead)
-                {
-                    var value = property.GetValue(newOptions);
-                    filteredOptions[property.Name] = value;
-                }
-            }
-
             using (var stream = _fileSystem.GetFileStream(OptionsFilePath, FileOpenMode.Create, FileAccessMode.Write))
             {
-                // Serialize the filtered dictionary instead of the full object
-                _jsonSerializer.SerializeToStream(filteredOptions, stream, new JsonSerializerOptions
-                                                                           {
-                                                                               Indent = true
-                                                                           });
+                _jsonSerializer.SerializeToStream(newOptions, stream);
             }
-        }
-
-        lock (_lockObj)
-        {
+            
+            _lastFileModified = _fileSystem.GetLastWriteTimeUtc(OptionsFilePath).DateTime;
             _options = newOptions;
         }
 

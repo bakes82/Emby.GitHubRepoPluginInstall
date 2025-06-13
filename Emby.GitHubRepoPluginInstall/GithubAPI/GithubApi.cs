@@ -11,17 +11,35 @@ using MediaBrowser.Model.Serialization;
 
 namespace Emby.GitHubRepoPluginInstall.GithubAPI;
 
-public class GitHubApiClient
+public class GitHubApiClient : IDisposable
 {
     private readonly HttpClient      _client;
     private readonly IJsonSerializer _jsonSerializer;
     private readonly ILogger         _logger;
+    private readonly bool            _disposeClient;
 
     public GitHubApiClient(string githubToken, HttpClient httpClient, IJsonSerializer jsonSerializer, ILogger logger)
     {
         _jsonSerializer = jsonSerializer;
         _logger         = logger;
-        _client         = httpClient;
+        _client         = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
+        _disposeClient  = false;
+
+        _client.DefaultRequestHeaders.Accept.Clear();
+        _client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+        _client.DefaultRequestHeaders.UserAgent.Clear();
+        _client.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("GitHubReleaseManager", "1.0"));
+
+        if (!string.IsNullOrEmpty(githubToken))
+            _client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", githubToken);
+    }
+
+    public GitHubApiClient(string githubToken, IJsonSerializer jsonSerializer, ILogger logger)
+    {
+        _jsonSerializer = jsonSerializer;
+        _logger         = logger;
+        _client         = new HttpClient();
+        _disposeClient  = true;
 
         _client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
         _client.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("GitHubReleaseManager", "1.0"));
@@ -50,44 +68,47 @@ public class GitHubApiClient
 
     public async Task<List<GitHubRelease>> GetLatestReleasesAsync(List<ReposToProcess> _repositories)
     {
-        var returnData = new List<GitHubRelease>();
+        var tasks = _repositories.Select(GetLatestReleaseForRepoAsync).ToArray();
+        var results = await Task.WhenAll(tasks);
+        
+        return results.Where(r => r != null).ToList();
+    }
 
-        foreach (var repo in _repositories)
+    private async Task<GitHubRelease> GetLatestReleaseForRepoAsync(ReposToProcess repo)
+    {
+        try
         {
-            try
+            var response = await _client.GetAsync($"https://api.github.com/repos/{repo.Owner}/{repo.Repository}/releases").ConfigureAwait(false);
+            response.EnsureSuccessStatusCode();
+
+            using (var stream = await response.Content.ReadAsStreamAsync().ConfigureAwait(false))
             {
-                var response = await _client.GetAsync($"https://api.github.com/repos/{repo.Owner}/{repo.Repository}/releases");
+                var gitHubReleases = _jsonSerializer.DeserializeFromStream<List<GitHubRelease>>(stream);
+                if (gitHubReleases?.Any() != true)
+                    return null;
 
-                response.EnsureSuccessStatusCode();
+                var filteredReleases = repo.GetPreRelease 
+                    ? gitHubReleases 
+                    : gitHubReleases.Where(x => !x.PreRelease).ToList();
 
-                using (var stream = await response.Content.ReadAsStreamAsync())
+                var latestRelease = filteredReleases
+                    .OrderByDescending(x => x.PublishedAt)
+                    .FirstOrDefault();
+
+                if (latestRelease != null)
                 {
-                    var gitHubReleases = _jsonSerializer.DeserializeFromStream<List<GitHubRelease>>(stream);
-                    if (gitHubReleases != null)
-                    {
-                        if (repo.GetPreRelease == false)
-                            gitHubReleases = gitHubReleases.Where(x => !x.PreRelease).ToList();
-
-                        gitHubReleases = gitHubReleases.OrderByDescending(x => x.PublishedAt).Take(1).ToList();
-
-                        foreach (var gitHubRelease in gitHubReleases)
-                        {
-                            gitHubRelease.BaseRepoUrl  = $"https://api.github.com/repos/{repo.Owner}/{repo.Repository}";
-                            gitHubRelease.GitHubCommit = await GetCommitDetailsAsync(gitHubRelease);
-                        }
-
-                        returnData.AddRange(gitHubReleases);
-                    }
+                    latestRelease.BaseRepoUrl = $"https://api.github.com/repos/{repo.Owner}/{repo.Repository}";
+                    latestRelease.GitHubCommit = await GetCommitDetailsAsync(latestRelease).ConfigureAwait(false);
                 }
-            }
-            catch (Exception ex)
-            {
-                _logger.Error($"Error getting releases for {repo.Owner}/{repo.Repository}: {ex.Message}");
-                throw;
+
+                return latestRelease;
             }
         }
-
-        return returnData;
+        catch (Exception ex)
+        {
+            _logger.Error($"Error getting releases for {repo.Owner}/{repo.Repository}: {ex.Message}");
+            return null;
+        }
     }
 
     public async Task<GitHubCommit> GetCommitDetailsAsync(GitHubRelease release)
@@ -100,10 +121,10 @@ public class GitHubApiClient
 
         try
         {
-            var response = await _client.GetAsync($"{release.BaseRepoUrl}/commits/{release.TargetCommitish}");
+            var response = await _client.GetAsync($"{release.BaseRepoUrl}/commits/{release.TargetCommitish}").ConfigureAwait(false);
             response.EnsureSuccessStatusCode();
 
-            using (var stream = await response.Content.ReadAsStreamAsync())
+            using (var stream = await response.Content.ReadAsStreamAsync().ConfigureAwait(false))
             {
                 return _jsonSerializer.DeserializeFromStream<GitHubCommit>(stream);
             }
@@ -116,10 +137,14 @@ public class GitHubApiClient
 
     public async Task<string> DownloadReleaseAsync(GitHubRelease release, string destinationPath)
     {
-        var downloadUrl = release.Assets.Where(x => x.IsDll)
-                                 .OrderByDescending(x => x.UpdatedAt)
-                                 .First()
-                                 .BrowserDownloadUrl;
+        var dllAsset = release.Assets?.FirstOrDefault(x => x.IsDll);
+        if (dllAsset == null)
+        {
+            _logger.Error($"No DLL asset found for release {release.Url}");
+            throw new InvalidOperationException("No DLL asset found for this release.");
+        }
+
+        var downloadUrl = dllAsset.BrowserDownloadUrl;
         if (string.IsNullOrEmpty(downloadUrl))
         {
             _logger.Error($"No download URL available for release {release.Url} that has a DLL asset.");
@@ -132,13 +157,13 @@ public class GitHubApiClient
 
         try
         {
-            var response = await _client.GetAsync(downloadUrl);
+            var response = await _client.GetAsync(downloadUrl).ConfigureAwait(false);
             response.EnsureSuccessStatusCode();
 
             // First download to a temporary file
             using (var fs = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None))
             {
-                await response.Content.CopyToAsync(fs);
+                await response.Content.CopyToAsync(fs).ConfigureAwait(false);
             }
 
             // If download was successful, replace the existing file
@@ -166,6 +191,7 @@ public class GitHubApiClient
 
     public void Dispose()
     {
-        _client?.Dispose();
+        if (_disposeClient)
+            _client?.Dispose();
     }
 }

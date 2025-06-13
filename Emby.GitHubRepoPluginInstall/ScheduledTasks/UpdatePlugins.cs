@@ -60,13 +60,13 @@ public class UpdatePlugins : IScheduledTask, IConfigurableScheduledTask
         var processedRepos   = 0;
         var downloads        = 0;
 
-        var gitHubClient = new GitHubApiClient(pluginUiOptions.GitHubToken, new HttpClient(), _jsonSerializer, _logger);
+        using var gitHubClient = new GitHubApiClient(pluginUiOptions.GitHubToken, _jsonSerializer, _logger);
 
         foreach (var repo in pluginUiOptions.Repos.Where(x => x.AutoUpdate))
         {
             try
             {
-                var release = await gitHubClient.GetLatestReleaseAsync(repo);
+                var release = await gitHubClient.GetLatestReleaseAsync(repo).ConfigureAwait(false);
                 if (release == null)
                 {
                     _activityManager.Create(new ActivityLogEntry
@@ -77,7 +77,7 @@ public class UpdatePlugins : IScheduledTask, IConfigurableScheduledTask
                                                 Type          = "GithubRepoPluginUpdateFailed",
                                                 ItemId        = null,
                                                 Date          = DateTimeOffset.Now,
-                                                UserId        = adminUser.InternalId.ToString(),
+                                                UserId        = adminUser?.InternalId.ToString(),
                                                 Severity      = LogSeverity.Warn
                                             });
                     continue;
@@ -85,7 +85,7 @@ public class UpdatePlugins : IScheduledTask, IConfigurableScheduledTask
 
                 if (!release.TagName.Equals(repo.LastVersionDownloaded, StringComparison.OrdinalIgnoreCase))
                 {
-                    var fileName = await gitHubClient.DownloadReleaseAsync(release, applicationPaths.PluginsPath);
+                    var fileName = await gitHubClient.DownloadReleaseAsync(release, applicationPaths.PluginsPath).ConfigureAwait(false);
                     downloads++;
                     repo.LastVersionDownloaded = release.TagName;
                     repo.FileName              = fileName;
@@ -100,7 +100,7 @@ public class UpdatePlugins : IScheduledTask, IConfigurableScheduledTask
                                                 Type          = "PluginInstalled",
                                                 ItemId        = null,
                                                 Date          = DateTimeOffset.Now,
-                                                //UserId        = adminUser.InternalId.ToString(),
+                                                //UserId        = adminUser?.InternalId.ToString(),
                                                 Severity = LogSeverity.Info
                                             });
                 }
@@ -114,7 +114,7 @@ public class UpdatePlugins : IScheduledTask, IConfigurableScheduledTask
                                                 Type          = "GithubRepoPluginUpdateFailed",
                                                 ItemId        = null,
                                                 Date          = DateTimeOffset.Now,
-                                                UserId        = adminUser.InternalId.ToString(),
+                                                UserId        = adminUser?.InternalId.ToString(),
                                                 Severity      = LogSeverity.Info
                                             });
                 }
@@ -131,7 +131,7 @@ public class UpdatePlugins : IScheduledTask, IConfigurableScheduledTask
                                             Type          = "GithubRepoPluginUpdateFailed",
                                             ItemId        = null,
                                             Date          = DateTimeOffset.Now,
-                                            UserId        = adminUser.InternalId.ToString(),
+                                            UserId        = adminUser?.InternalId.ToString(),
                                             Severity      = LogSeverity.Fatal
                                         });
             }
@@ -173,6 +173,6 @@ public class UpdatePlugins : IScheduledTask, IConfigurableScheduledTask
                                      {
                                          IsAdministrator = true
                                      })
-                           .Items.First();
+                           .Items.FirstOrDefault();
     }
 }
