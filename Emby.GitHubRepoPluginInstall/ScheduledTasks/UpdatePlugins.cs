@@ -51,7 +51,7 @@ public class UpdatePlugins : IScheduledTask, IConfigurableScheduledTask
     public async Task Execute(CancellationToken cancellationToken, IProgress<double> progress)
     {
         var adminUser        = GetAdminUser();
-        var store            = new PluginOptionsStore(_applicationHost, _logger, GitHubRepPluginInstall.PluginName);
+        var store            = new SecurePluginOptionsStore(_applicationHost, _logger, GitHubRepPluginInstall.PluginName);
         var applicationPaths = _applicationHost.Resolve<IApplicationPaths>();
 
         var pluginUiOptions = store.GetOptions();
@@ -66,13 +66,16 @@ public class UpdatePlugins : IScheduledTask, IConfigurableScheduledTask
         {
             try
             {
-                var release = await gitHubClient.GetLatestReleaseAsync(repo).ConfigureAwait(false);
+                var release = await gitHubClient.GetLatestReleaseAsync(repo, cancellationToken).ConfigureAwait(false);
                 if (release == null)
                 {
                     _activityManager.Create(new ActivityLogEntry
                                             {
                                                 Name          = $"Release for {repo.Repository} NOT Updated",
-                                                Overview      = "<pre><code>No Release Found!</code></pre>",
+                                                Overview      = Helpers.ActivityLogHelper.CreateWarningHtml(
+                                                    $"No Release Found for {repo.Repository}",
+                                                    "The repository does not have any releases available.",
+                                                    $"Repository: {repo.Owner}/{repo.Repository}\nURL: {repo.Url}\nPre-release enabled: {repo.GetPreRelease}"),
                                                 ShortOverview = null,
                                                 Type          = "GithubRepoPluginUpdateFailed",
                                                 ItemId        = null,
@@ -85,17 +88,19 @@ public class UpdatePlugins : IScheduledTask, IConfigurableScheduledTask
 
                 if (!release.TagName.Equals(repo.LastVersionDownloaded, StringComparison.OrdinalIgnoreCase))
                 {
-                    var fileName = await gitHubClient.DownloadReleaseAsync(release, applicationPaths.PluginsPath).ConfigureAwait(false);
+                    var fileName = await gitHubClient.DownloadReleaseAsync(release, applicationPaths.PluginsPath, null, cancellationToken).ConfigureAwait(false);
                     downloads++;
                     repo.LastVersionDownloaded = release.TagName;
                     repo.FileName              = fileName;
 
                     _activityManager.Create(new ActivityLogEntry
                                             {
-                                                Name =
-                                                    $"Plugin {repo.Repository} updated to {repo.LastVersionDownloaded}",
-                                                Overview =
-                                                    $"<pre><code>Plugin updated to: {repo.LastVersionDownloaded} {Environment.NewLine} {release.Body ?? release.GitHubCommit.GitHubCommitDetails.Message}</code></pre>",
+                                                Name = $"Plugin {repo.Repository} updated to {repo.LastVersionDownloaded}",
+                                                Overview = Helpers.ActivityLogHelper.CreateSuccessHtml(
+                                                    $"Plugin {repo.Repository} Successfully Updated",
+                                                    "Plugin has been downloaded and installed.",
+                                                    repo.LastVersionDownloaded,
+                                                    release.Body ?? release.GitHubCommit?.GitHubCommitDetails?.Message ?? "No release notes available."),
                                                 ShortOverview = null,
                                                 Type          = "PluginInstalled",
                                                 ItemId        = null,
@@ -109,7 +114,10 @@ public class UpdatePlugins : IScheduledTask, IConfigurableScheduledTask
                     _activityManager.Create(new ActivityLogEntry
                                             {
                                                 Name          = $"Release for {repo.Repository} Already Up to Date",
-                                                Overview      = "<pre><code>Already Up to Date!</code></pre>",
+                                                Overview      = Helpers.ActivityLogHelper.CreateInfoHtml(
+                                                    $"Plugin {repo.Repository} is Up to Date",
+                                                    "No update required - you have the latest version.",
+                                                    $"Current Version: {repo.LastVersionDownloaded}\nRepository: {repo.Owner}/{repo.Repository}"),
                                                 ShortOverview = null,
                                                 Type          = "GithubRepoPluginUpdateFailed",
                                                 ItemId        = null,
@@ -121,12 +129,34 @@ public class UpdatePlugins : IScheduledTask, IConfigurableScheduledTask
 
                 repo.LastDateTimeChecked = DateTime.UtcNow;
             }
+            catch (UnauthorizedAccessException ex)
+            {
+                _activityManager.Create(new ActivityLogEntry
+                                        {
+                                            Name          = $"Authentication Failed for {repo.Repository}",
+                                            Overview      = Helpers.ActivityLogHelper.CreateErrorHtml(
+                                                $"Authentication Failed for {repo.Repository}",
+                                                "GitHub API returned 401 Unauthorized. Please check your Personal Access Token.",
+                                                ex.Message,
+                                                null),
+                                            ShortOverview = null,
+                                            Type          = "GithubRepoPluginUpdateFailed",
+                                            ItemId        = null,
+                                            Date          = DateTimeOffset.Now,
+                                            UserId        = adminUser?.InternalId.ToString(),
+                                            Severity      = LogSeverity.Error
+                                        });
+            }
             catch (Exception ex)
             {
                 _activityManager.Create(new ActivityLogEntry
                                         {
                                             Name          = $"Release {repo.Repository} NOT Updated",
-                                            Overview      = $"<pre><code>ERROR:{ex.Message}</code></pre>",
+                                            Overview      = Helpers.ActivityLogHelper.CreateErrorHtml(
+                                                $"Failed to Update Plugin {repo.Repository}",
+                                                "An error occurred while trying to update the plugin.",
+                                                ex.Message,
+                                                ex.StackTrace),
                                             ShortOverview = null,
                                             Type          = "GithubRepoPluginUpdateFailed",
                                             ItemId        = null,

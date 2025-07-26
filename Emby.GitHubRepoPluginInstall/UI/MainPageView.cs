@@ -22,14 +22,14 @@ namespace Emby.GitHubRepoPluginInstall.UI;
 
 internal class MainPageView : PluginPageView
 {
-    private readonly ILogger            _logger;
-    private readonly PluginOptionsStore _store;
+    private readonly ILogger                  _logger;
+    private readonly SecurePluginOptionsStore _store;
     private readonly IApplicationHost   _appHost;
     private readonly IJsonSerializer    _jsonSerializer;
     private readonly PluginInfo         _pluginInfo;
 
     public MainPageView(PluginInfo pluginInfo,
-                        PluginOptionsStore store,
+                        SecurePluginOptionsStore store,
                         ILogger logger,
                         IApplicationHost appHost,
                         IJsonSerializer jsonSerializer) : base(pluginInfo.Id)
@@ -44,8 +44,14 @@ internal class MainPageView : PluginPageView
 
         ContentData = data;
 
-        CreateReleaseListAsync()
-            .Wait();
+        try
+        {
+            CreateReleaseListAsync().Wait();
+        }
+        catch (Exception ex)
+        {
+            _logger.ErrorException("Error in CreateReleaseListAsync", ex);
+        }
     }
 
     public PluginUIOptions PluginUiOptions => ContentData as PluginUIOptions;
@@ -59,11 +65,13 @@ internal class MainPageView : PluginPageView
     public override bool IsCommandAllowed(string commandKey)
     {
         _logger.Info($"Command Key is {commandKey}");
-        if (commandKey == "Add"    ||
-            commandKey == "Remove" ||
-            commandKey == "Edit"   ||
-            commandKey == "Save"   ||
-            commandKey == "Download")
+        if (commandKey == "Add"       ||
+            commandKey == "Remove"    ||
+            commandKey == "Edit"      ||
+            commandKey == "Save"      ||
+            commandKey == "Download"  ||
+            commandKey == "UpdateAll" ||
+            commandKey == "CheckAll")
             return true;
 
         return base.IsCommandAllowed(commandKey);
@@ -74,15 +82,13 @@ internal class MainPageView : PluginPageView
         if (commandId == "Download")
         {
             var item = PluginUiOptions.Repos.Find(x => x.Id == itemId);
-            var gitHubClient =
-                new GitHubApiClient(PluginUiOptions.GitHubToken, new HttpClient(), _jsonSerializer, _logger);
-            var release = await gitHubClient.GetLatestReleasesAsync(item);
+            using var gitHubClient = new GitHubApiClient(PluginUiOptions.GitHubToken, _jsonSerializer, _logger);
+            var releases = await gitHubClient.GetLatestReleasesAsync(item);
             var applicationPaths = _appHost.Resolve<IApplicationPaths>();
-            var fileName = await gitHubClient.DownloadReleaseAsync(release.First(), applicationPaths.PluginsPath);
-            item.LastVersionDownloaded = release.First()
-                                                .TagName;
+            var fileName = await gitHubClient.DownloadReleaseAsync(releases.First(), applicationPaths.PluginsPath);
+            item.LastVersionDownloaded = releases.First().TagName;
             item.LastDateTimeChecked = DateTime.UtcNow;
-            item.FileName            = fileName;
+            item.FileName = fileName;
 
             _store.SetOptions(PluginUiOptions);
             _appHost.NotifyPendingRestart();
@@ -142,9 +148,93 @@ internal class MainPageView : PluginPageView
                 PluginUiOptions.Repos = new List<ReposToProcess>();
             _store.SetOptions(PluginUiOptions);
 
-            CreateReleaseListAsync()
-                .Wait();
+            try
+            {
+                CreateReleaseListAsync().Wait();
+            }
+            catch (Exception ex)
+            {
+                _logger.ErrorException("Error in CreateReleaseListAsync after removal", ex);
+            }
 
+            return await Task.FromResult((IPluginUIView)this);
+        }
+
+        if (commandId == "UpdateAll")
+        {
+            try
+            {
+                var updatedCount = 0;
+                using var gitHubClient = new GitHubApiClient(PluginUiOptions.GitHubToken, _jsonSerializer, _logger);
+                var applicationPaths = _appHost.Resolve<IApplicationPaths>();
+
+                foreach (var repo in PluginUiOptions.Repos.ToList())
+                {
+                    try
+                    {
+                        var release = await gitHubClient.GetLatestReleaseAsync(repo, true);
+                        if (release != null && !release.TagName.Equals(repo.LastVersionDownloaded, StringComparison.OrdinalIgnoreCase))
+                        {
+                            // Check if release has DLL assets before trying to download
+                            if (release.Assets?.Any(x => x.IsDll) == true)
+                            {
+                                var dllAsset = release.Assets.FirstOrDefault(x => x.IsDll);
+                                _logger.Debug($"Attempting to download {repo.Repository} v{release.TagName} - DLL asset: {dllAsset?.Name}, URL: {dllAsset?.BrowserDownloadUrl}");
+                                
+                                try
+                                {
+                                    var fileName = await gitHubClient.DownloadReleaseAsync(release, applicationPaths.PluginsPath);
+                                    repo.LastVersionDownloaded = release.TagName;
+                                    repo.LastDateTimeChecked = DateTime.UtcNow;
+                                    repo.FileName = fileName;
+                                    updatedCount++;
+                                }
+                                catch (Exception downloadEx)
+                                {
+                                    _logger.Error($"Failed to download {repo.Repository} v{release.TagName}: {downloadEx.Message}");
+                                }
+                            }
+                            else
+                            {
+                                _logger.Warn($"No DLL assets found for {repo.Repository} release {release.TagName}");
+                            }
+                        }
+                        else if (release != null)
+                        {
+                            repo.LastDateTimeChecked = DateTime.UtcNow;
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.Error($"Failed to update {repo.Repository}: {ex.Message}");
+                    }
+                }
+
+                _store.SetOptions(PluginUiOptions);
+                
+                if (updatedCount > 0)
+                {
+                    _appHost.NotifyPendingRestart();
+                    PluginUiOptions.Logs = new CaptionItem($"Successfully updated {updatedCount} plugin(s). Server restart required.") { IsVisible = true };
+                }
+                else
+                {
+                    PluginUiOptions.Logs = new CaptionItem("All plugins are already up to date.") { IsVisible = true };
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.ErrorException("Error during bulk update", ex);
+                PluginUiOptions.Logs = new CaptionItem($"Error during bulk update: {ex.Message}") { IsVisible = true };
+            }
+
+            CreateReleaseListAsync().Wait();
+            return await Task.FromResult((IPluginUIView)this);
+        }
+
+        if (commandId == "CheckAll")
+        {
+            CreateReleaseListAsync().Wait();
             return await Task.FromResult((IPluginUIView)this);
         }
 
@@ -225,13 +315,18 @@ internal class MainPageView : PluginPageView
 
         if (!PluginUiOptions.GitHubToken.IsNullOrEmpty())
         {
-            var gitHubClient =
-                new GitHubApiClient(PluginUiOptions.GitHubToken, new HttpClient(), _jsonSerializer, _logger);
+            using var gitHubClient = new GitHubApiClient(PluginUiOptions.GitHubToken, _jsonSerializer, _logger);
             foreach (var repo in PluginUiOptions.Repos)
             {
                 try
                 {
                     var release = await gitHubClient.GetLatestReleaseAsync(repo);
+
+                    if (release == null)
+                    {
+                        _logger.Warn($"No release found for repository {repo.Owner}/{repo.Repository}");
+                        continue;
+                    }
 
                     _logger.Info(_jsonSerializer.SerializeToString(release, new JsonSerializerOptions
                                                                             {
@@ -239,7 +334,8 @@ internal class MainPageView : PluginPageView
                                                                             }));
 
                     var note = release.Body?.Replace("\n", "<br/>") ??
-                               release.GitHubCommit.GitHubCommitDetails.Message.Replace("\n", "<br/>");
+                               release.GitHubCommit?.GitHubCommitDetails?.Message?.Replace("\n", "<br/>") ??
+                               "No release notes available";
 
                     var itemToAdd = new GenericListItem
                                     {
@@ -263,8 +359,8 @@ internal class MainPageView : PluginPageView
                                                        {
                                                            PrimaryText = "Release Notes:<br/>" + note,
                                                            SecondaryText = "Updated At: " +
-                                                                           release.Assets.First()
-                                                                               .UpdatedAt.ToString(),
+                                                                           (release.Assets?.FirstOrDefault()?.UpdatedAt.ToString() ?? 
+                                                                            release.PublishedAt.ToString()),
                                                            Icon     = IconNames.message,
                                                            IconMode = ItemListIconMode.LargeRegular
                                                        }
@@ -280,4 +376,64 @@ internal class MainPageView : PluginPageView
             }
         }
     }
+
+    private async Task<IPluginUIView> HandleUpdateAllCommand()
+    {
+        try
+        {
+            var updatedCount = 0;
+            using var gitHubClient = new GitHubApiClient(PluginUiOptions.GitHubToken, _jsonSerializer, _logger);
+            var applicationPaths = _appHost.Resolve<IApplicationPaths>();
+
+            foreach (var repo in PluginUiOptions.Repos.ToList())
+            {
+                try
+                {
+                    var release = await gitHubClient.GetLatestReleaseAsync(repo);
+                    if (release != null && !release.TagName.Equals(repo.LastVersionDownloaded, StringComparison.OrdinalIgnoreCase))
+                    {
+                        var fileName = await gitHubClient.DownloadReleaseAsync(release, applicationPaths.PluginsPath);
+                        repo.LastVersionDownloaded = release.TagName;
+                        repo.LastDateTimeChecked = DateTime.UtcNow;
+                        repo.FileName = fileName;
+                        updatedCount++;
+                    }
+                    else
+                    {
+                        repo.LastDateTimeChecked = DateTime.UtcNow;
+                    }
+                }
+                catch (UnauthorizedAccessException ex)
+                {
+                    _logger.Error($"Authentication failed for {repo.Repository}: {ex.Message}");
+                }
+                catch (Exception ex)
+                {
+                    _logger.Error($"Failed to update {repo.Repository}: {ex.Message}");
+                }
+            }
+
+            _store.SetOptions(PluginUiOptions);
+            
+            if (updatedCount > 0)
+            {
+                _appHost.NotifyPendingRestart();
+                PluginUiOptions.Logs = new CaptionItem($"Successfully updated {updatedCount} plugin(s). Server restart required.") { IsVisible = true };
+            }
+            else
+            {
+                PluginUiOptions.Logs = new CaptionItem("All plugins are already up to date.") { IsVisible = true };
+            }
+
+            CreateReleaseListAsync().Wait();
+        }
+        catch (Exception ex)
+        {
+            _logger.ErrorException("Error during bulk update", ex);
+            PluginUiOptions.Logs = new CaptionItem($"Error during bulk update: {ex.Message}") { IsVisible = true };
+        }
+
+        return await Task.FromResult((IPluginUIView)this);
+    }
+
 }

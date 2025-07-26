@@ -11,9 +11,9 @@ namespace Emby.GitHubRepoPluginInstall.UI;
 
 internal class MainPageController : ControllerBase
 {
-    private readonly ILogger            _logger;
-    private readonly PluginInfo         _pluginInfo;
-    private readonly PluginOptionsStore _pluginOptionsStore;
+    private readonly ILogger                  _logger;
+    private readonly PluginInfo               _pluginInfo;
+    private readonly SecurePluginOptionsStore _pluginOptionsStore;
     private readonly IApplicationHost   _applicationHost;
     private readonly IJsonSerializer    _jsonSerializer;
 
@@ -24,7 +24,7 @@ internal class MainPageController : ControllerBase
     /// <param name="applicationHost"></param>
     /// <param name="jsonSerializer"></param>
     public MainPageController(PluginInfo pluginInfo,
-                              PluginOptionsStore pluginOptionsStore,
+                              SecurePluginOptionsStore pluginOptionsStore,
                               ILogger logger,
                               IApplicationHost applicationHost,
                               IJsonSerializer jsonSerializer) : base(pluginInfo.Id)

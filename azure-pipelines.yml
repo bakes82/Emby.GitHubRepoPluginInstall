@@ -1,0 +1,214 @@
+# Azure DevOps Pipeline for Emby.GitHubRepoPluginInstall
+# Builds both Test and Production DLLs, then optionally creates GitHub release
+
+trigger:
+  branches:
+    include:
+    - master
+    - main
+
+name: $(date:yyyy).$(date:MM).$(date:dd).$(rev:r)
+
+variables:
+- name: BuildConfiguration
+  value: 'Release'
+- name: BuildParameters.RestoreBuildProjects
+  value: '**/*.csproj'
+- name: githubConnection
+  value: '0c4efa1c-ed85-4f09-87cc-a2d8b4809b3f'  # GitHub service connection GUID
+- group: GitHub-Secrets
+
+stages:
+- stage: Build
+  displayName: 'Build Test and Production'
+  jobs:
+  
+  # Build Test version
+  - job: BuildTest
+    displayName: 'Build Test Version'
+    pool:
+      vmImage: 'ubuntu-latest'
+    variables:
+      DefineConstants: 'TEST'
+      BuildTarget: 'Test'
+    steps:
+    - checkout: self
+      persistCredentials: true
+      
+    - task: UseDotNet@2
+      displayName: 'Use .NET SDK'
+      inputs:
+        packageType: 'sdk'
+        version: '8.x'
+        
+    - task: DotNetCoreCLI@2
+      displayName: 'Restore'
+      inputs:
+        command: 'restore'
+        projects: '$(BuildParameters.RestoreBuildProjects)'
+        verbosityRestore: 'Normal'
+        
+    - task: DotNetCoreCLI@2
+      displayName: 'Build Test Version'
+      inputs:
+        command: 'build'
+        projects: '$(BuildParameters.RestoreBuildProjects)'
+        arguments: '--configuration $(BuildConfiguration) --no-restore -p:DefineConstants="$(DefineConstants)" -p:AssemblyVersion=$(Build.BuildNumber) -p:FileVersion=$(Build.BuildNumber) -p:InformationalVersion=$(Build.BuildNumber) -p:Version=$(Build.BuildNumber) -p:Authors="Bradley Baker" -p:Product="Emby GitHub Repo Plugin Install" -p:PackageVersion=$(Build.BuildNumber)'
+        
+    - task: DotNetCoreCLI@2
+      displayName: 'Publish'
+      inputs:
+        command: 'publish'
+        publishWebProjects: false
+        projects: '$(BuildParameters.RestoreBuildProjects)'
+        arguments: '--configuration $(BuildConfiguration) --output $(Build.ArtifactStagingDirectory) --no-build'
+        zipAfterPublish: false
+        
+    - task: CopyFiles@2
+      displayName: 'Copy Test DLL'
+      inputs:
+        SourceFolder: '$(Build.ArtifactStagingDirectory)/Emby.GitHubRepoPluginInstall'
+        Contents: 'Emby.GitHubRepoPluginInstall.dll'
+        TargetFolder: '$(Build.ArtifactStagingDirectory)/Test'
+        
+    - task: PublishBuildArtifacts@1
+      displayName: 'Publish Test Artifact'
+      inputs:
+        PathtoPublish: '$(Build.ArtifactStagingDirectory)/Test/Emby.GitHubRepoPluginInstall.dll'
+        ArtifactName: 'Emby.GitHubRepoPluginInstall-Test'
+        
+  # Build Production version
+  - job: BuildProduction
+    displayName: 'Build Production Version'
+    pool:
+      vmImage: 'ubuntu-latest'
+    variables:
+      DefineConstants: 'PRODUCTION'
+      BuildTarget: 'Production'
+    steps:
+    - checkout: self
+      persistCredentials: true
+      
+    - task: UseDotNet@2
+      displayName: 'Use .NET SDK'
+      inputs:
+        packageType: 'sdk'
+        version: '8.x'
+        
+    - task: DotNetCoreCLI@2
+      displayName: 'Restore'
+      inputs:
+        command: 'restore'
+        projects: '$(BuildParameters.RestoreBuildProjects)'
+        verbosityRestore: 'Normal'
+        
+    - task: DotNetCoreCLI@2
+      displayName: 'Build Production Version'
+      inputs:
+        command: 'build'
+        projects: '$(BuildParameters.RestoreBuildProjects)'
+        arguments: '--configuration $(BuildConfiguration) --no-restore -p:DefineConstants="$(DefineConstants)" -p:AssemblyVersion=$(Build.BuildNumber) -p:FileVersion=$(Build.BuildNumber) -p:InformationalVersion=$(Build.BuildNumber) -p:Version=$(Build.BuildNumber) -p:Authors="Bradley Baker" -p:Product="Emby GitHub Repo Plugin Install" -p:PackageVersion=$(Build.BuildNumber)'
+        
+    - task: DotNetCoreCLI@2
+      displayName: 'Publish'
+      inputs:
+        command: 'publish'
+        publishWebProjects: false
+        projects: '$(BuildParameters.RestoreBuildProjects)'
+        arguments: '--configuration $(BuildConfiguration) --output $(Build.ArtifactStagingDirectory) --no-build'
+        zipAfterPublish: false
+        
+    - task: CopyFiles@2
+      displayName: 'Copy Production DLL'
+      inputs:
+        SourceFolder: '$(Build.ArtifactStagingDirectory)/Emby.GitHubRepoPluginInstall'
+        Contents: 'Emby.GitHubRepoPluginInstall.dll'
+        TargetFolder: '$(Build.ArtifactStagingDirectory)/Production'
+        
+    - task: PublishBuildArtifacts@1
+      displayName: 'Publish Production Artifact'
+      inputs:
+        PathtoPublish: '$(Build.ArtifactStagingDirectory)/Production/Emby.GitHubRepoPluginInstall.dll'
+        ArtifactName: 'Emby.GitHubRepoPluginInstall-Production'
+
+- stage: GitHubRelease
+  displayName: 'Create GitHub Release'
+  dependsOn: Build
+  condition: succeeded()
+  jobs:
+  - deployment: CreateRelease
+    displayName: 'Create GitHub Release'
+    pool:
+      vmImage: 'ubuntu-latest'
+    environment: 'GitHub-Release-GitHubRepoPluginInstall'
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - download: current
+          
+          - checkout: self
+            fetchDepth: 0
+            persistCredentials: true
+            
+          # Push code to GitHub
+          - bash: |
+              cd /tmp && rm -rf temp_repo && mkdir temp_repo && cd temp_repo && git init && \
+              git remote add source "https://$(System.AccessToken)@dev.azure.com/bradleyjbaker1982/Emby%20Plugins/_git/Emby.GitHubRepoPluginInstall" && \
+              git fetch source --prune && git checkout -b master source/master && \
+              git remote add target "https://$(GitHubToken)@github.com/bakes82/Emby.GitHubRepoPluginInstall.git" && \
+              git push target master --force && git push target --tags
+            displayName: 'Push to GitHub Repository'
+            
+          # Generate release notes
+          - bash: |
+              echo "Getting last 10 commits for release notes"
+              
+              # Create release notes with proper formatting
+              {
+                echo "Build: $(Build.BuildNumber)"
+                echo "Date: $(date +'%Y-%m-%d %H:%M:%S UTC')"
+                echo ""
+                git log --pretty=format:"- [%ad] %s (%h)" --date=short -10
+              } > release_notes.txt
+              
+              echo "Release notes:"
+              cat release_notes.txt
+              
+              # Read and escape the notes for Azure DevOps variable
+              NOTES=$(<release_notes.txt)
+              # Replace newlines with %0A for proper multi-line support
+              NOTES="${NOTES//$'\n'/%0A}"
+              
+              # Set the variable for the GitHub release task
+              echo "##vso[task.setvariable variable=ReleaseNotes]$NOTES"
+            displayName: 'Generate Release Notes'
+            
+          # Verify artifact exists
+          - bash: |
+              echo "Checking for production artifact..."
+              if [ -f "$(Pipeline.Workspace)/Emby.GitHubRepoPluginInstall-Production/Emby.GitHubRepoPluginInstall.dll" ]; then
+                echo "Production artifact found!"
+                ls -la "$(Pipeline.Workspace)/Emby.GitHubRepoPluginInstall-Production/"
+              else
+                echo "ERROR: Production artifact not found!"
+                echo "Contents of Pipeline.Workspace:"
+                ls -la "$(Pipeline.Workspace)/"
+                exit 1
+              fi
+            displayName: 'Verify artifact exists'
+            
+          # Create GitHub Release
+          - task: GitHubRelease@1
+            displayName: 'GitHub release (create)'
+            inputs:
+              gitHubConnection: 'github.com_bakes82'
+              repositoryName: 'bakes82/Emby.GitHubRepoPluginInstall'
+              target: 'master'
+              tagSource: 'userSpecifiedTag'
+              tag: '$(Build.BuildNumber)'
+              title: '$(Build.BuildNumber)'
+              releaseNotesSource: 'inline'
+              releaseNotesInline: '$(ReleaseNotes)'
+              assets: '$(Pipeline.Workspace)/Emby.GitHubRepoPluginInstall-Production/Emby.GitHubRepoPluginInstall.dll'
+              addChangeLog: false

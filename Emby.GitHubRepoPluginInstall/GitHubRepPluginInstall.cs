@@ -19,7 +19,7 @@ public class GitHubRepPluginInstall : BasePlugin, IHasThumbImage, IHasUIPages, I
     public static readonly string PluginName = "GitHub Repo Plugin Install";
 
     private readonly ILogger                       _logger;
-    private readonly PluginOptionsStore            _pluginOptionsStore;
+    private readonly SecurePluginOptionsStore      _pluginOptionsStore;
     private readonly IServerApplicationHost        _applicationHost;
     public readonly  IJsonSerializer               _jsonSerializer;
     private          List<IPluginUIPageController> _pages;
@@ -35,7 +35,7 @@ public class GitHubRepPluginInstall : BasePlugin, IHasThumbImage, IHasUIPages, I
         _applicationHost    = applicationHost;
         _jsonSerializer     = jsonSerializer;
         _logger             = logManager.GetLogger(PluginName);
-        _pluginOptionsStore = new PluginOptionsStore(applicationHost, _logger, Name);
+        _pluginOptionsStore = new SecurePluginOptionsStore(applicationHost, _logger, Name);
     }
 
     public override        Guid   Id          => new Guid("78185FEE-2187-4703-A8D0-4E625761D6E7");

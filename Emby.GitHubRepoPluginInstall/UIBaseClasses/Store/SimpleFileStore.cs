@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using Emby.GitHubRepoPluginInstall.Models;
 using Emby.Web.GenericEdit;
 using MediaBrowser.Common;
@@ -15,15 +16,17 @@ namespace Emby.GitHubRepoPluginInstall.UIBaseClasses.Store;
 public class SimpleFileStore<TOptionType> : SimpleContentStore<TOptionType>
     where TOptionType : EditableOptionsBase, new()
 {
-    private readonly IFileSystem     _fileSystem;
-    private readonly IJsonSerializer _jsonSerializer;
-    private readonly object          _lockObj = new object();
-    private readonly ILogger         _logger;
-    private readonly string          _pluginConfigPath;
-    private readonly string          _pluginFullName;
+    private static readonly Dictionary<Type, PropertyInfo[]> _propertyCache = new Dictionary<Type, PropertyInfo[]>();
+    private static readonly object                           _propertyCacheLock = new object();
+    private readonly        IFileSystem                      _fileSystem;
+    private readonly        IJsonSerializer                  _jsonSerializer;
+    private readonly        object                           _lockObj = new object();
+    private readonly        ILogger                          _logger;
+    private readonly        string                           _pluginConfigPath;
+    private readonly        string                           _pluginFullName;
+    private                 long                             _lastFileModifiedTicks;
 
     private TOptionType _options;
-    private DateTime    _lastFileModified;
 
     public SimpleFileStore(IApplicationHost applicationHost, ILogger logger, string pluginFullName)
     {
@@ -56,11 +59,9 @@ public class SimpleFileStore<TOptionType> : SimpleContentStore<TOptionType>
 
             if (_fileSystem.FileExists(OptionsFilePath))
             {
-                var lastModified = _fileSystem.GetLastWriteTimeUtc(OptionsFilePath).DateTime;
-                if (lastModified > _lastFileModified)
-                {
-                    return ReloadOptions();
-                }
+                var lastModifiedTicks = _fileSystem.GetLastWriteTimeUtc(OptionsFilePath)
+                                                   .UtcTicks;
+                if (lastModifiedTicks > _lastFileModifiedTicks) return ReloadOptions();
             }
 
             return _options;
@@ -75,14 +76,19 @@ public class SimpleFileStore<TOptionType> : SimpleContentStore<TOptionType>
 
             try
             {
-                if (!_fileSystem.FileExists(OptionsFilePath)) return tempOptions;
+                if (!_fileSystem.FileExists(OptionsFilePath))
+                {
+                    _options               = tempOptions;
+                    _lastFileModifiedTicks = 0;
+                    return tempOptions;
+                }
 
-                _lastFileModified = _fileSystem.GetLastWriteTimeUtc(OptionsFilePath).DateTime;
+                _lastFileModifiedTicks = _fileSystem.GetLastWriteTimeUtc(OptionsFilePath)
+                                                    .UtcTicks;
 
                 using (var stream = _fileSystem.OpenRead(OptionsFilePath))
                 {
                     var deserialized = tempOptions.DeserializeFromJsonStream(stream, _jsonSerializer);
-
                     _options = deserialized as TOptionType;
                 }
             }
@@ -108,16 +114,49 @@ public class SimpleFileStore<TOptionType> : SimpleContentStore<TOptionType>
 
         lock (_lockObj)
         {
+            // Create a dictionary to store only properties that are not marked with DontSave
+            var filteredOptions = new Dictionary<string, object>();
+            var properties      = GetCachedProperties(typeof(TOptionType));
+
+            foreach (var property in properties)
+            {
+                if (property.GetCustomAttributes(typeof(DontSaveAttribute), false)
+                            .Any())
+                    continue;
+
+                if (property.CanRead)
+                {
+                    var value = property.GetValue(newOptions);
+                    filteredOptions[property.Name] = value;
+                }
+            }
+
             using (var stream = _fileSystem.GetFileStream(OptionsFilePath, FileOpenMode.Create, FileAccessMode.Write))
             {
-                _jsonSerializer.SerializeToStream(newOptions, stream);
+                // Serialize the filtered dictionary instead of the full object
+                _jsonSerializer.SerializeToStream(filteredOptions, stream, new JsonSerializerOptions
+                                                                           {
+                                                                               Indent = true
+                                                                           });
             }
-            
-            _lastFileModified = _fileSystem.GetLastWriteTimeUtc(OptionsFilePath).DateTime;
-            _options = newOptions;
+
+            _options               = newOptions;
+            _lastFileModifiedTicks = DateTime.UtcNow.Ticks;
         }
 
         var savedArgs = new FileSavedEventArgs(newOptions);
         FileSaved?.Invoke(this, savedArgs);
+    }
+
+    private static PropertyInfo[] GetCachedProperties(Type type)
+    {
+        lock (_propertyCacheLock)
+        {
+            if (_propertyCache.TryGetValue(type, out var cachedProperties)) return cachedProperties;
+
+            var properties = type.GetProperties();
+            _propertyCache[type] = properties;
+            return properties;
+        }
     }
 }

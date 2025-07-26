@@ -12,7 +12,12 @@ You first need to create a Github PAT (Personal Access Token).
 3. 🛠 Generate a Personal Access Token:
    In Developer settings, select Personal access tokens from the sidebar.
    Click on Tokens (classic) and then click Generate new token.
-   Generate New Token (Classic)
+   
+   **Important Scopes to Select:**
+   - ✅ **repo** - Required for accessing private repositories (includes all repo permissions)
+   - ✅ **read:org** - Required if accessing private repos in organizations
+   
+   For public repositories only, you can use a token with no scopes, but it's recommended to at least have basic read access.
 
 Add the URL of the repository you want to install the plugin from. The URL should be in the format `https://github.com/owner/repository`.
 Set option to auto update (optional). This will check for updates every 24 hours by default, you can adjust the schedule task.

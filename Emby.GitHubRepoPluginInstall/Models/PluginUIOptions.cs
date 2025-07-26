@@ -33,7 +33,11 @@ public class PluginUIOptions : EditableOptionsBase
     [DisplayName("GitHub Token (PAT)")]
     [Description("Generate a GitHub Personal Access Token (PAT) and enter it here.")]
     [Required]
+    [DontSave]
     public string GitHubToken { get; set; }
+    
+    [Browsable(false)]
+    public string EncryptedGitHubToken { get; set; }
 
     public bool RestartServerAfterInstall { get; set; }
 
@@ -176,6 +180,25 @@ public class PluginUIOptions : EditableOptionsBase
             Icon    = IconNames.edit,
             Caption = "Edit Selected",
             Data1   = "Edit"
+        };
+
+    [DontSave]
+    public ButtonItem UpdateAll =>
+        new ButtonItem
+        {
+            Icon    = IconNames.system_update_alt,
+            Caption = "Update All Plugins",
+            Data1   = "UpdateAll",
+            ConfirmationPrompt = "Are you sure you want to update all plugins that have available updates?"
+        };
+
+    [DontSave]
+    public ButtonItem CheckAllForUpdates =>
+        new ButtonItem
+        {
+            Icon    = IconNames.refresh,
+            Caption = "Check All for Updates",
+            Data1   = "CheckAll"
         };
 
     [DontSave]
