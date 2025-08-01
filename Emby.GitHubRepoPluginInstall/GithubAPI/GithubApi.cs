@@ -386,6 +386,74 @@ public class GitHubApiClient : IDisposable, IGitHubApiClient
         }
     }
 
+    public async Task<List<PluginRegistryEntry>> GetAllRegistryPluginsAsync(List<PluginRegistry> registries, CancellationToken cancellationToken = default)
+    {
+        var allPlugins = new List<PluginRegistryEntry>();
+        
+        foreach (var registry in registries.Where(r => r.Enabled))
+        {
+            try
+            {
+                PluginRegistryData registryData = null;
+                
+                // Handle embedded registry
+                if (registry.RawUrl == "embedded://default")
+                {
+                    var assembly = typeof(GitHubApiClient).Assembly;
+                    var resourceName = assembly.GetManifestResourceNames()
+                        .FirstOrDefault(n => n.EndsWith("DefaultRegistry.plugins.json"));
+
+                    if (resourceName != null)
+                    {
+                        using (var stream = assembly.GetManifestResourceStream(resourceName))
+                        {
+                            registryData = _jsonSerializer.DeserializeFromStream<PluginRegistryData>(stream);
+                        }
+                    }
+                }
+                else
+                {
+                    // Handle regular URL registries
+                    var response = await _client.GetAsync(registry.RawUrl, cancellationToken).ConfigureAwait(false);
+                    if (response.IsSuccessStatusCode)
+                    {
+                        using (var stream = await response.Content.ReadAsStreamAsync().ConfigureAwait(false))
+                        {
+                            registryData = _jsonSerializer.DeserializeFromStream<PluginRegistryData>(stream);
+                        }
+                    }
+                }
+                
+                if (registryData?.Plugins != null)
+                {
+                    foreach (var plugin in registryData.Plugins)
+                    {
+                        plugin.RegistrySource = registry.Name;
+                        
+                        // Check for duplicates by URL (case-insensitive)
+                        var existingPlugin = allPlugins.FirstOrDefault(p => 
+                            string.Equals(p.Url, plugin.Url, StringComparison.OrdinalIgnoreCase));
+                        
+                        if (existingPlugin == null)
+                        {
+                            allPlugins.Add(plugin);
+                        }
+                        else
+                        {
+                            _logger.Debug($"Skipping duplicate plugin URL: {plugin.Url} from {registry.Name} (already exists from {existingPlugin.RegistrySource})");
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.Error($"Failed to fetch registry {registry.Name} from {registry.RawUrl}: {ex.Message}");
+            }
+        }
+        
+        return allPlugins;
+    }
+
     public void Dispose()
     {
         if (_disposeClient)

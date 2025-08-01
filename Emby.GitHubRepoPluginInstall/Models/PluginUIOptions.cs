@@ -25,6 +25,12 @@ public class PluginUIOptions : EditableOptionsBase
                                             };
 
     [DontSave]
+    public CaptionItem RepoLogs { get; set; } = new CaptionItem("")
+                                               {
+                                                   IsVisible = false
+                                               };
+
+    [DontSave]
     public SpacerItem Spacer1 { get; set; } = new SpacerItem();
 
     [DontSave]
@@ -72,6 +78,9 @@ public class PluginUIOptions : EditableOptionsBase
 
     [Browsable(false)]
     public List<ReposToProcess> Repos { get; set; } = new List<ReposToProcess>();
+
+    [Browsable(false)]
+    public List<PluginRegistry> PluginRegistries { get; set; } = new List<PluginRegistry>();
 
     [DisplayName("Current Repositories")]
     [DontSave]
@@ -203,6 +212,99 @@ public class PluginUIOptions : EditableOptionsBase
 
     [DontSave]
     public SpacerItem Spacer3 { get; set; } = new SpacerItem();
+
+    [DontSave]
+    public CaptionItem CaptionRegistries { get; set; } = new CaptionItem("Plugin Registries");
+
+    [DontSave]
+    public ButtonItem AddRegistry =>
+        new ButtonItem
+        {
+            Icon    = IconNames.library_add,
+            Caption = "Add Registry",
+            Data1   = "AddRegistry"
+        };
+
+    [Browsable(false)]
+    [DontSave]
+    public IList<string> SelectedRegistryId { get; set; }
+
+    [DisplayName("Current Registries")]
+    [DontSave]
+    [GridDataSource(nameof(PluginRegistries))]
+    [GridSelectionSource(nameof(SelectedRegistryId))]
+    public DxDataGrid RegistryGrid
+    {
+        get
+        {
+            var options = new DxGridOptions(new PluginRegistry(), "Id", false, true, true, false);
+
+            options.selection.mode         = DxGridSelection.SelectionMode.single;
+            options.columnResizingMode     = DxGridOptions.ColumnResizingMode.nextColumn;
+            options.heightMode             = DxGridOptions.GridHeightMode.small;
+            options.allowColumnReordering  = true;
+            options.focusedRowEnabled      = true;
+
+            foreach (var column in options.columns) column.visible = false;
+
+            var nameCol = options.columns.FirstOrDefault(e => e.dataField == nameof(PluginRegistry.Name));
+            if (nameCol != null)
+            {
+                nameCol.caption      = "Registry Name";
+                nameCol.width        = 300;
+                nameCol.visibleIndex = 1;
+                nameCol.visible      = true;
+            }
+
+            var urlCol = options.columns.FirstOrDefault(e => e.dataField == nameof(PluginRegistry.RawUrl));
+            if (urlCol != null)
+            {
+                urlCol.caption      = "URL";
+                urlCol.width        = 500;
+                urlCol.visibleIndex = 2;
+                urlCol.visible      = true;
+            }
+
+            var enabledCol = options.columns.FirstOrDefault(e => e.dataField == nameof(PluginRegistry.Enabled));
+            if (enabledCol != null)
+            {
+                enabledCol.caption      = "Enabled";
+                enabledCol.width        = 100;
+                enabledCol.visibleIndex = 3;
+                enabledCol.visible      = true;
+            }
+
+            return new DxDataGrid(options);
+        }
+    }
+
+    [DontSave]
+    public ButtonItem DeleteRegistry =>
+        new ButtonItem
+        {
+            Icon               = IconNames.delete_forever,
+            Caption            = "Remove Registry",
+            Data1              = "RemoveRegistry",
+            ConfirmationPrompt = "Are you sure you want to remove the selected registry?"
+        };
+
+    [DontSave]
+    public ButtonItem EditRegistry =>
+        new ButtonItem
+        {
+            Icon    = IconNames.edit,
+            Caption = "Edit Registry",
+            Data1   = "EditRegistry"
+        };
+
+    [DontSave]
+    public CaptionItem RegistryLogs { get; set; } = new CaptionItem("")
+                                                   {
+                                                       IsVisible = false
+                                                   };
+
+    [DontSave]
+    public SpacerItem Spacer4 { get; set; } = new SpacerItem();
 
     [DontSave]
     public CaptionItem CaptionLatestReleases { get; set; } = new CaptionItem("Latest Releases");

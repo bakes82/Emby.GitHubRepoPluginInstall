@@ -13,5 +13,8 @@
     <ItemGroup>
         <None Remove="ThumbImage.jpg"/>
         <EmbeddedResource Include="ThumbImage.jpg"/>
+        <EmbeddedResource Include="..\DefaultRegistry\plugins.json">
+            <Link>DefaultRegistry\plugins.json</Link>
+        </EmbeddedResource>
     </ItemGroup>
 </Project>

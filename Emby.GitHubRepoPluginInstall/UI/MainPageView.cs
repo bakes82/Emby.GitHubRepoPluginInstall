@@ -44,6 +44,9 @@ internal class MainPageView : PluginPageView
 
         ContentData = data;
 
+        // Initialize default registry if none exist
+        InitializeDefaultRegistry();
+
         try
         {
             CreateReleaseListAsync().Wait();
@@ -65,13 +68,16 @@ internal class MainPageView : PluginPageView
     public override bool IsCommandAllowed(string commandKey)
     {
         _logger.Info($"Command Key is {commandKey}");
-        if (commandKey == "Add"       ||
-            commandKey == "Remove"    ||
-            commandKey == "Edit"      ||
-            commandKey == "Save"      ||
-            commandKey == "Download"  ||
-            commandKey == "UpdateAll" ||
-            commandKey == "CheckAll")
+        if (commandKey == "Add"            ||
+            commandKey == "Remove"         ||
+            commandKey == "Edit"           ||
+            commandKey == "Save"           ||
+            commandKey == "Download"       ||
+            commandKey == "UpdateAll"      ||
+            commandKey == "CheckAll"       ||
+            commandKey == "AddRegistry"    ||
+            commandKey == "EditRegistry"   ||
+            commandKey == "RemoveRegistry")
             return true;
 
         return base.IsCommandAllowed(commandKey);
@@ -104,7 +110,23 @@ internal class MainPageView : PluginPageView
 
         if (commandId == "Add")
         {
-            var newView = new RepoConfigDialogView(_pluginInfo.Id);
+            // Fetch available plugins from registries
+            List<PluginRegistryEntry> availablePlugins = null;
+            try
+            {
+                using var gitHubClient = new GitHubApiClient(PluginUiOptions.GitHubToken, _jsonSerializer, _logger);
+                var allPlugins = await gitHubClient.GetAllRegistryPluginsAsync(PluginUiOptions.PluginRegistries);
+                
+                // Filter out plugins that are already in the repos list
+                var existingUrls = PluginUiOptions.Repos?.Select(r => r.Url.ToLowerInvariant()).ToHashSet() ?? new HashSet<string>();
+                availablePlugins = allPlugins.Where(p => !existingUrls.Contains(p.Url.ToLowerInvariant())).ToList();
+            }
+            catch (Exception ex)
+            {
+                _logger.Error($"Failed to fetch registry plugins: {ex.Message}");
+            }
+            
+            var newView = new RepoConfigDialogView(_pluginInfo.Id, null, availablePlugins);
             return await Task.FromResult<IPluginUIView>(newView);
         }
 
@@ -113,10 +135,30 @@ internal class MainPageView : PluginPageView
             try
             {
                 var item = PluginUiOptions.Repos.Find(x => x.Id.ToString() == PluginUiOptions.SelectedItemId.First());
-                var editView = new RepoConfigDialogView(_pluginInfo.Id, item);
+                
+                // Fetch available plugins from registries
+                List<PluginRegistryEntry> availablePlugins = null;
+                try
+                {
+                    using var gitHubClient = new GitHubApiClient(PluginUiOptions.GitHubToken, _jsonSerializer, _logger);
+                    var allPlugins = await gitHubClient.GetAllRegistryPluginsAsync(PluginUiOptions.PluginRegistries);
+                    
+                    // Filter out plugins that are already in the repos list (except the one being edited)
+                    var existingUrls = PluginUiOptions.Repos?
+                        .Where(r => r.Id != item.Id)
+                        .Select(r => r.Url.ToLowerInvariant())
+                        .ToHashSet() ?? new HashSet<string>();
+                    availablePlugins = allPlugins.Where(p => !existingUrls.Contains(p.Url.ToLowerInvariant())).ToList();
+                }
+                catch (Exception ex)
+                {
+                    _logger.Error($"Failed to fetch registry plugins: {ex.Message}");
+                }
+                
+                var editView = new RepoConfigDialogView(_pluginInfo.Id, item, availablePlugins);
                 return await Task.FromResult<IPluginUIView>(editView);
             }
-            catch (Exception exception)
+            catch (Exception)
             {
                 //ignore exception
             }
@@ -128,20 +170,59 @@ internal class MainPageView : PluginPageView
         {
             try
             {
-                var item = PluginUiOptions.Repos.Find(x => x.Id.ToString() == PluginUiOptions.SelectedItemId.First());
+                _logger.Info($"Remove command - SelectedItemId count: {PluginUiOptions.SelectedItemId?.Count ?? 0}");
+                
+                if (PluginUiOptions.SelectedItemId == null || !PluginUiOptions.SelectedItemId.Any())
+                {
+                    PluginUiOptions.RepoLogs = new CaptionItem("Please select a repository to remove") { IsVisible = true };
+                    return await Task.FromResult((IPluginUIView)this);
+                }
+
+                var selectedId = PluginUiOptions.SelectedItemId.First();
+                _logger.Info($"Attempting to remove repo with ID: {selectedId}");
+                
+                var item = PluginUiOptions.Repos.Find(x => x.Id.ToString() == selectedId);
 
                 if (item != null)
                 {
+                    _logger.Info($"Found repo to remove: {item.Repository}");
+                    var fileDeleted = false;
                     var applicationPaths = _appHost.Resolve<IApplicationPaths>();
-                    var fullPath         = Path.Combine(applicationPaths.PluginsPath, item.FileName);
-                    if (File.Exists(fullPath)) File.Delete(fullPath);
+                    
+                    if (!string.IsNullOrEmpty(item.FileName))
+                    {
+                        var fullPath = Path.Combine(applicationPaths.PluginsPath, item.FileName);
+                        if (File.Exists(fullPath))
+                        {
+                            File.Delete(fullPath);
+                            fileDeleted = true;
+                            _logger.Info($"Deleted plugin file: {fullPath}");
+                        }
+                    }
+                    
                     PluginUiOptions.Repos.Remove(item);
-                    _appHost.NotifyPendingRestart();
+                    
+                    // Only trigger restart if we actually deleted a plugin file
+                    if (fileDeleted)
+                    {
+                        _appHost.NotifyPendingRestart();
+                        PluginUiOptions.RepoLogs = new CaptionItem($"Removed repository: {item.Repository}. Server restart required.") { IsVisible = true };
+                    }
+                    else
+                    {
+                        PluginUiOptions.RepoLogs = new CaptionItem($"Removed repository: {item.Repository}") { IsVisible = true };
+                    }
+                }
+                else
+                {
+                    _logger.Warn($"Could not find repo with ID: {selectedId}");
+                    PluginUiOptions.RepoLogs = new CaptionItem("Could not find selected repository") { IsVisible = true };
                 }
             }
             catch (Exception exception)
             {
-                //ignore exception
+                _logger.ErrorException("Error during repository removal", exception);
+                PluginUiOptions.RepoLogs = new CaptionItem($"Error removing repository: {exception.Message}") { IsVisible = true };
             }
 
             if (PluginUiOptions.Repos == null || PluginUiOptions.Repos.Count == 0)
@@ -238,10 +319,83 @@ internal class MainPageView : PluginPageView
             return await Task.FromResult((IPluginUIView)this);
         }
 
+        if (commandId == "AddRegistry")
+        {
+            var newView = new RegistryConfigDialogView(_pluginInfo.Id);
+            return await Task.FromResult<IPluginUIView>(newView);
+        }
+
+        if (commandId == "EditRegistry")
+        {
+            try
+            {
+                if (PluginUiOptions.SelectedRegistryId == null || !PluginUiOptions.SelectedRegistryId.Any())
+                {
+                    PluginUiOptions.RegistryLogs = new CaptionItem("Please select a registry to edit") { IsVisible = true };
+                    return await Task.FromResult((IPluginUIView)this);
+                }
+
+                var registry = PluginUiOptions.PluginRegistries.Find(x => x.Id == PluginUiOptions.SelectedRegistryId.FirstOrDefault());
+                if (registry != null && registry.Id != "embedded-default")
+                {
+                    var editView = new RegistryConfigDialogView(_pluginInfo.Id, registry);
+                    return await Task.FromResult<IPluginUIView>(editView);
+                }
+                else if (registry?.Id == "embedded-default")
+                {
+                    PluginUiOptions.RegistryLogs = new CaptionItem("Cannot edit built-in registry") { IsVisible = true };
+                }
+                else
+                {
+                    PluginUiOptions.RegistryLogs = new CaptionItem("Could not find selected registry") { IsVisible = true };
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.Error($"Error editing registry: {ex.Message}");
+                PluginUiOptions.RegistryLogs = new CaptionItem($"Error editing registry: {ex.Message}") { IsVisible = true };
+            }
+            return await Task.FromResult((IPluginUIView)this);
+        }
+
+        if (commandId == "RemoveRegistry")
+        {
+            try
+            {
+                if (PluginUiOptions.SelectedRegistryId == null || !PluginUiOptions.SelectedRegistryId.Any())
+                {
+                    PluginUiOptions.RegistryLogs = new CaptionItem("Please select a registry to remove") { IsVisible = true };
+                    return await Task.FromResult((IPluginUIView)this);
+                }
+
+                var registry = PluginUiOptions.PluginRegistries.Find(x => x.Id == PluginUiOptions.SelectedRegistryId.FirstOrDefault());
+                if (registry != null && registry.Id != "embedded-default")
+                {
+                    PluginUiOptions.PluginRegistries.Remove(registry);
+                    PluginUiOptions.RegistryLogs = new CaptionItem($"Removed registry: {registry.Name}") { IsVisible = true };
+                    _store.SetOptions(PluginUiOptions);
+                }
+                else if (registry?.Id == "embedded-default")
+                {
+                    PluginUiOptions.RegistryLogs = new CaptionItem("Cannot remove built-in registry") { IsVisible = true };
+                }
+                else
+                {
+                    PluginUiOptions.RegistryLogs = new CaptionItem("Could not find selected registry") { IsVisible = true };
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.Error($"Error removing registry: {ex.Message}");
+                PluginUiOptions.RegistryLogs = new CaptionItem($"Error removing registry: {ex.Message}") { IsVisible = true };
+            }
+            return await Task.FromResult((IPluginUIView)this);
+        }
+
         return await base.RunCommand(itemId, commandId, data);
     }
 
-    public override async void OnDialogResult(IPluginUIView dialogView, bool completedOk, object data)
+    public override void OnDialogResult(IPluginUIView dialogView, bool completedOk, object data)
     {
         try
         {
@@ -295,8 +449,41 @@ internal class MainPageView : PluginPageView
 
                 _store.SetOptions(PluginUiOptions);
 
-                await CreateReleaseListAsync();
+                // Reload options to restore decrypted token for UI display
+                ContentData = _store.GetOptions();
 
+                CreateReleaseListAsync().Wait();
+
+                RaiseUIViewInfoChanged();
+            }
+
+            if (dialogView is RegistryConfigDialogView registryDialog && completedOk)
+            {
+                var newRegistry = new PluginRegistry
+                {
+                    Id = registryDialog.RegistryConfigUi.Id ?? Guid.NewGuid().ToString(),
+                    Name = registryDialog.RegistryConfigUi.Name,
+                    RawUrl = registryDialog.RegistryConfigUi.RawUrl,
+                    Enabled = registryDialog.RegistryConfigUi.Enabled
+                };
+
+                if (PluginUiOptions.PluginRegistries == null)
+                    PluginUiOptions.PluginRegistries = new List<PluginRegistry>();
+
+                // Check if editing existing
+                var existing = PluginUiOptions.PluginRegistries.FirstOrDefault(r => r.Id == newRegistry.Id);
+                if (existing != null)
+                {
+                    existing.Name = newRegistry.Name;
+                    existing.RawUrl = newRegistry.RawUrl;
+                    existing.Enabled = newRegistry.Enabled;
+                }
+                else
+                {
+                    PluginUiOptions.PluginRegistries.Add(newRegistry);
+                }
+
+                _store.SetOptions(PluginUiOptions);
                 RaiseUIViewInfoChanged();
             }
 
@@ -374,6 +561,49 @@ internal class MainPageView : PluginPageView
                     _logger.ErrorException(e.Message, e);
                 }
             }
+        }
+    }
+
+    private void InitializeDefaultRegistry()
+    {
+        // Check if any registries exist
+        if (PluginUiOptions.PluginRegistries == null)
+        {
+            PluginUiOptions.PluginRegistries = new List<PluginRegistry>();
+        }
+
+        // Check if we need to add default entries
+        if (PluginUiOptions.Repos == null)
+        {
+            PluginUiOptions.Repos = new List<ReposToProcess>();
+        }
+
+        // Only add default registry if no registries exist
+        if (PluginUiOptions.PluginRegistries.Count == 0)
+        {
+            // Add embedded registry as a default registry source
+            PluginUiOptions.PluginRegistries.Add(new PluginRegistry
+            {
+                Id = "embedded-default",
+                Name = "Built-in",
+                RawUrl = "embedded://default",
+                Enabled = true
+            });
+            _logger.Info("Added default embedded registry");
+        }
+
+        // Only add self-update if it's the very first run (no repos at all)
+        if (PluginUiOptions.Repos.Count == 0)
+        {
+            var selfUrl = "https://github.com/bakes82/Emby.GitHubRepoPluginInstall";
+            PluginUiOptions.Repos.Add(new ReposToProcess
+            {
+                Url = selfUrl,
+                GetPreRelease = false,
+                AutoUpdate = true
+            });
+            _logger.Info("Added self-update entry for GitHub Plugin Installer");
+            _store.SetOptions(PluginUiOptions);
         }
     }
 

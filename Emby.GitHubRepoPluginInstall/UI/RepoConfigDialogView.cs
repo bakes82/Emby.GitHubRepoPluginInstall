@@ -1,4 +1,5 @@
-﻿using System.Threading.Tasks;
+﻿using System.Collections.Generic;
+using System.Threading.Tasks;
 using Emby.GitHubRepoPluginInstall.Models;
 using Emby.GitHubRepoPluginInstall.UIBaseClasses.Views;
 using MediaBrowser.Model.Plugins.UI.Views;
@@ -7,7 +8,7 @@ namespace Emby.GitHubRepoPluginInstall.UI;
 
 internal class RepoConfigDialogView : PluginDialogView
 {
-    public RepoConfigDialogView(string pluginId, ReposToProcess savedRepoConfig = null) : base(pluginId)
+    public RepoConfigDialogView(string pluginId, ReposToProcess savedRepoConfig = null, List<PluginRegistryEntry> availablePlugins = null) : base(pluginId)
     {
         var uiVars = new RepoConfigUi();
 
@@ -16,6 +17,12 @@ internal class RepoConfigDialogView : PluginDialogView
             uiVars.Id                      = savedRepoConfig.Id;
             uiVars.Url                     = savedRepoConfig.Url;
             uiVars.AllowPreReleaseVersions = savedRepoConfig.GetPreRelease;
+            uiVars.AutoUpdate              = savedRepoConfig.AutoUpdate;
+        }
+
+        if (availablePlugins != null)
+        {
+            uiVars.AvailablePlugins = availablePlugins;
         }
 
         ContentData = uiVars;
@@ -32,15 +39,33 @@ internal class RepoConfigDialogView : PluginDialogView
         return Task.CompletedTask;
     }
 
-    public override Task OnOkCommand(string providerId, string commandId, string data)
+    public override bool IsCommandAllowed(string commandKey)
     {
-        return Task.CompletedTask;
+        if (commandKey == "PluginSelected")
+            return true;
+            
+        return base.IsCommandAllowed(commandKey);
     }
 
     public override Task<IPluginUIView> RunCommand(string itemId, string commandId, string data)
     {
-        //if (1 == 1) return Task.FromResult((IPluginUIView)this);
-
+        if (commandId == "PluginSelected")
+        {
+            // When dropdown selection changes, update the URL field
+            if (!string.IsNullOrEmpty(RepoConfigUi.SelectedPlugin))
+            {
+                RepoConfigUi.Url = RepoConfigUi.SelectedPlugin;
+                // Clear the dropdown selection to show "-- Manual Entry --" again
+                RepoConfigUi.SelectedPlugin = "";
+            }
+            return Task.FromResult((IPluginUIView)this);
+        }
+        
         return base.RunCommand(itemId, commandId, data);
+    }
+    
+    public override Task OnOkCommand(string providerId, string commandId, string data)
+    {
+        return Task.CompletedTask;
     }
 }

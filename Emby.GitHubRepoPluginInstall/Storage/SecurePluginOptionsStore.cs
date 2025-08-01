@@ -24,7 +24,7 @@ public class SecurePluginOptionsStore : PluginOptionsStore
     {
         var options = base.GetOptions();
         
-        // Decrypt the token when loading
+        // Always decrypt the token when loading for UI display
         if (!string.IsNullOrEmpty(options.EncryptedGitHubToken))
         {
             options.GitHubToken = _secureStorage.Unprotect(options.EncryptedGitHubToken);
@@ -41,7 +41,7 @@ public class SecurePluginOptionsStore : PluginOptionsStore
             if (!string.IsNullOrEmpty(options.GitHubToken))
             {
                 options.EncryptedGitHubToken = _secureStorage.Protect(options.GitHubToken);
-                // Clear the plain text token so it's not saved
+                // Clear the plain text token so it's not kept in memory
                 options.GitHubToken = null;
             }
         }
