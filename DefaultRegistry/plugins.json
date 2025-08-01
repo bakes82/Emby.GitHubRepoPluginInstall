@@ -1,0 +1,26 @@
+{
+  "name": "Emby Community Plugins",
+  "description": "Default registry of community-maintained Emby plugins",
+  "plugins": [
+    {
+      "name": "GitHub Plugin Installer",
+      "description": "Install and update Emby plugins directly from GitHub repositories",
+      "url": "https://github.com/bakes82/Emby.GitHubRepoPluginInstall"
+    },
+    {
+      "name": "MDBList Collections",
+      "description": "Automatically create collections from MDBList",
+      "url": "https://github.com/bakes82/Emby.MDBListCollections"
+    },
+    {
+      "name": "Trakt List Collections",
+      "description": "Automatically create collections from Trakt lists",
+      "url": "https://github.com/bakes82/Emby.TraktListCollections"
+    },
+    {
+      "name": "Codec Killer",
+      "description": "End transcodings of unwanted codecs",
+      "url": "https://github.com/bakes82/Emby.CodecKiller"
+    }
+  ]
+}
